@@ -29,7 +29,41 @@ const thinkingDot = document.getElementById("thinkingDot");
 const thinkingDotCard = document.getElementById("thinkingDotCard");
 
 chip.addEventListener("click", () => setExpanded(true));
-document.getElementById("collapseBtn").addEventListener("click", () => setExpanded(false));
+document.getElementById("collapseBtn").addEventListener("click", (e) => {
+  e.stopPropagation();
+  setExpanded(false);
+});
+
+// --- Window dragging (NSPanel needs JS-driven startDragging) ---
+// A non-activating NSPanel ignores `data-tauri-drag-region`, so we drive the
+// native drag ourselves. On pointer-down over a drag region we call Tauri's
+// startDragging(). We only START the drag once the pointer actually moves past a
+// small threshold, so a plain click still registers as a click (expand/collapse).
+function wireDrag(el) {
+  el.addEventListener("mousedown", (e) => {
+    if (e.button !== 0) return;
+    if (e.target.closest("button")) return; // let buttons handle their own clicks
+    const startX = e.clientX, startY = e.clientY;
+    let dragging = false;
+    const onMove = (m) => {
+      if (dragging) return;
+      if (Math.abs(m.clientX - startX) > 4 || Math.abs(m.clientY - startY) > 4) {
+        dragging = true;
+        cleanup();
+        const w = window.__TAURI__?.window?.getCurrentWindow?.();
+        if (w && w.startDragging) w.startDragging();
+      }
+    };
+    const cleanup = () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", cleanup);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", cleanup);
+  });
+}
+wireDrag(chip);
+wireDrag(document.getElementById("card").querySelector(".card-header"));
 
 function setExpanded(v) {
   expanded = v;

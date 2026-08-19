@@ -14,3 +14,6 @@ tauri = { version = "2", features = ["macos-private-api"] }
 objc2 = "0.6"
 objc2-app-kit = "0.3"
 objc2-foundation = "0.3"
+# Reclasses Tauri's NSWindow into a non-activating NSPanel so the overlay can
+# float over another app's full-screen Space (plain NSWindow cannot). v2 branch = Tauri v2.
+tauri-nspanel = { git = "https://github.com/ahkohd/tauri-nspanel", branch = "v2" }

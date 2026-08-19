@@ -1,14 +1,28 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 // Companion Overlay — Tauri v2 shell. UI lives in ../src.
-// On macOS we promote the window to a floating HUD panel (above other apps,
-// on all Spaces, no Dock icon, doesn't activate as an app).
+// On macOS we convert the window into a non-activating NSPanel so it can float
+// over EVERYTHING, including another app's full-screen Space (a plain NSWindow
+// cannot — macOS only honors `fullScreenAuxiliary` for a non-activating panel).
 
 use tauri::Manager;
 
+#[cfg(target_os = "macos")]
+use tauri_nspanel::{cocoa::appkit::NSWindowCollectionBehavior, WebviewWindowExt};
+
 fn main() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+
+    #[cfg(target_os = "macos")]
+    let builder = builder.plugin(tauri_nspanel::init());
+
+    builder
         .setup(|app| {
+            // Accessory policy: no Dock icon / Cmd+Tab entry, AND required for a
+            // window to display over another app's full-screen space.
+            #[cfg(target_os = "macos")]
+            app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+
             if let Some(win) = app.get_webview_window("overlay") {
                 let _ = win.show();
                 #[cfg(target_os = "macos")]
@@ -22,39 +36,36 @@ fn main() {
 
 #[cfg(target_os = "macos")]
 fn make_hud(win: &tauri::WebviewWindow) {
-    use objc2_app_kit::{
-        NSApplication, NSApplicationActivationPolicy, NSWindow, NSWindowCollectionBehavior,
-        NSWindowLevel,
+    // Reclass the Tauri NSWindow into an NSPanel. Everything below only works
+    // because it's now a panel, not a plain window.
+    let panel = match win.to_panel() {
+        Ok(p) => p,
+        Err(_) => return,
     };
-    use objc2_foundation::MainThreadMarker;
 
-    let ptr = match win.ns_window() {
-        Ok(p) if !p.is_null() => p,
-        _ => return,
-    };
-    // SAFETY: ptr is a valid NSWindow* provided by tauri on the main thread.
-    let ns_window: &NSWindow = unsafe { &*(ptr as *const NSWindow) };
+    // NSStatusWindowLevel (25) — sits over another app's fullscreen Space. The
+    // crate's own example uses NSFloatWindowLevel (4); status is one notch higher
+    // and the guide's recommended level for reliably clearing fullscreen content.
+    panel.set_level(25);
 
-    unsafe {
-        // Float above normal windows (25 ≈ NSStatusWindowLevel).
-        let level: NSWindowLevel = 25;
-        ns_window.setLevel(level);
+    // NonactivatingPanel (1 << 7): clicking the overlay never steals "active app"
+    // focus from the fullscreen app underneath, so it won't force an exit-fullscreen.
+    const NS_NONACTIVATING_PANEL: i32 = 1 << 7;
+    panel.set_style_mask(NS_NONACTIVATING_PANEL);
 
-        // Appear on every Space and layer over fullscreen apps.
-        let behavior = NSWindowCollectionBehavior::CanJoinAllSpaces
-            | NSWindowCollectionBehavior::FullScreenAuxiliary
-            | NSWindowCollectionBehavior::Stationary;
-        ns_window.setCollectionBehavior(behavior);
+    // The magic combo — honored now that it's a panel:
+    //   FullScreenAuxiliary → render inside another app's fullscreen Space
+    //   CanJoinAllSpaces    → show on whatever Space is active
+    panel.set_collection_behaviour(
+        NSWindowCollectionBehavior::NSWindowCollectionBehaviorFullScreenAuxiliary
+            | NSWindowCollectionBehavior::NSWindowCollectionBehaviorCanJoinAllSpaces
+            | NSWindowCollectionBehavior::NSWindowCollectionBehaviorStationary,
+    );
 
-        // Show without forcing this process to become the active app.
-        ns_window.orderFrontRegardless();
-    }
+    // NOTE: a non-activating panel ignores `data-tauri-drag-region` AND
+    // `moveableByWindowBackground` (the webview captures the mouse). Dragging is
+    // instead driven from JS via Tauri's startDragging() — see overlay/src/app.js.
 
-    // Remove the Dock icon / Cmd+Tab entry — pure floating utility.
-    if let Some(mtm) = MainThreadMarker::new() {
-        let ns_app = NSApplication::sharedApplication(mtm);
-        unsafe {
-            ns_app.setActivationPolicy(NSApplicationActivationPolicy::Accessory);
-        }
-    }
+    // Show without activating.
+    panel.order_front_regardless();
 }

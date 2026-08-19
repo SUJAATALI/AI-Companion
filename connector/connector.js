@@ -39,10 +39,13 @@ if (fakeIdx !== -1) {
   const evt = JSON.parse(readFileSync(file, "utf8"));
   emit(evt);
   // Simulate a "thinking" blip + a follow-up update so the overlay can test transitions.
+  // NOTE: don't call process.exit() synchronously here — it would kill the process
+  // before these timers fire. Let the event loop drain naturally after the last emit.
   setTimeout(() => emit({ type: "card", state: { ...evt.state, thinking: true, updatedAt: Date.now() } }), 1500);
-  setTimeout(() => emit({ type: "card", state: { ...evt.state, thinking: false, updatedAt: Date.now() } }), 3000);
-  console.error("[connector] fake mode: replayed", file);
-  process.exit(0);
+  setTimeout(() => {
+    emit({ type: "card", state: { ...evt.state, thinking: false, updatedAt: Date.now() } });
+    console.error("[connector] fake mode: replayed", file);
+  }, 3000);
 }
 
 // ---------- LIVE MODE ----------
@@ -123,7 +126,10 @@ async function main() {
   ws.on("error", (e) => console.error("[connector] ws error:", e.message));
 }
 
-main().catch((e) => {
-  console.error("[connector] fatal:", e.message);
-  process.exit(1);
-});
+// Live mode only — fake mode returns above (its timers drain the event loop).
+if (fakeIdx === -1) {
+  main().catch((e) => {
+    console.error("[connector] fatal:", e.message);
+    process.exit(1);
+  });
+}
