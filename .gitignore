@@ -1,0 +1,17 @@
+# Rust / Tauri build output (huge — never commit)
+target/
+**/target/
+
+# Node
+node_modules/
+**/node_modules/
+npm-debug.log*
+
+# Generated icon source (regenerate via make_icon.py)
+overlay/icon-src.png
+
+# OS / editor
+.DS_Store
+*.swp
+.idea/
+.vscode/

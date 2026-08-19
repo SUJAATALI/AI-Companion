@@ -1,0 +1,14 @@
+{
+  "type": "card",
+  "state": {
+    "sessionId": "session-fake-0001",
+    "thinking": false,
+    "updatedAt": 1755590000000,
+    "items": [
+      { "id": "n1", "tier": "now", "text": "Address the timeline concern they just raised" },
+      { "id": "t1", "tier": "transition", "text": "Bring up the resource allocation gap" },
+      { "id": "l1", "tier": "later", "text": "Ask who owns the retry logic for the DDB write path" },
+      { "id": "c1", "tier": "covered", "text": "Confirmed launch date is still Q3" }
+    ]
+  }
+}

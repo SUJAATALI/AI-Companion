@@ -1,0 +1,16 @@
+{
+  "name": "companion-connector",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Bridges KAWA Live (HTTP + WebSocket) to a normalized CardState stream for the overlay.",
+  "bin": {
+    "companion-connector": "connector.js"
+  },
+  "scripts": {
+    "start": "node connector.js",
+    "fake": "node connector.js --fake ../fixtures/fake-card.json"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}

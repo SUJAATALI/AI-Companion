@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Companion</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <!-- Collapsed chip: shows the single top "now" item -->
+    <div id="chip" class="chip hidden" data-tauri-drag-region>
+      <span class="dot" id="thinkingDot"></span>
+      <span id="chipText">…</span>
+    </div>
+
+    <!-- Expanded card: full tiered coaching card -->
+    <div id="card" class="card hidden">
+      <div class="card-header" data-tauri-drag-region>
+        <span class="dot" id="thinkingDotCard"></span>
+        <span class="title">Companion</span>
+        <button id="collapseBtn" title="Collapse">–</button>
+      </div>
+      <div id="tiers"></div>
+    </div>
+
+    <script src="app.js"></script>
+  </body>
+</html>
