@@ -8,12 +8,13 @@
   },
   "app": {
     "macOSPrivateApi": true,
+    "withGlobalTauri": true,
     "windows": [
       {
         "label": "overlay",
         "title": "Companion",
-        "width": 340,
-        "height": 240,
+        "width": 360,
+        "height": 470,
         "center": true,
         "transparent": true,
         "decorations": false,

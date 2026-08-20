@@ -29,7 +29,58 @@ const thinkingDot = document.getElementById("thinkingDot");
 const thinkingDotCard = document.getElementById("thinkingDotCard");
 
 chip.addEventListener("click", () => setExpanded(true));
-document.getElementById("collapseBtn").addEventListener("click", () => setExpanded(false));
+document.getElementById("collapseBtn").addEventListener("click", (e) => {
+  e.stopPropagation();
+  setExpanded(false);
+});
+
+// JS-driven window dragging — a non-activating NSPanel ignores
+// data-tauri-drag-region, so we drive startDragging() ourselves.
+// The 4px threshold lets the same element be BOTH draggable (move >4px) and
+// clickable (release <4px → expand/collapse still fires).
+function wireDrag(el) {
+  if (!el) return;
+  el.addEventListener("mousedown", (e) => {
+    if (e.button !== 0) return;                 // left button only
+    if (e.target.closest("button")) return;      // don't drag from buttons
+    const startX = e.clientX;
+    const startY = e.clientY;
+    const onMove = (m) => {
+      if (Math.abs(m.clientX - startX) > 4 || Math.abs(m.clientY - startY) > 4) {
+        window.__TAURI__?.window?.getCurrentWindow?.().startDragging();
+        cleanup();
+      }
+    };
+    const cleanup = () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", cleanup);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", cleanup);
+  });
+}
+wireDrag(chip);
+wireDrag(document.querySelector(".card-header"));
+
+// Action: open-ended ask → answered by kiro-cli, shown in the response area.
+const askInput = document.getElementById("askInput");
+const answerEl = document.getElementById("answer");
+askInput?.addEventListener("mousedown", (e) => e.stopPropagation()); // don't trigger drag
+askInput?.addEventListener("keydown", async (e) => {
+  if (e.key !== "Enter") return;
+  const text = askInput.value.trim();
+  if (!text) return;
+  askInput.value = "";
+  answerEl.classList.remove("hidden");
+  answerEl.textContent = "…thinking";
+  try {
+    const reply = await window.__TAURI__?.core?.invoke("ask", { text });
+    answerEl.textContent = reply || "(no answer)";
+  } catch (err) {
+    console.error("ask failed:", err);
+    answerEl.textContent = "⚠️ " + (err?.toString() || "failed");
+  }
+});
 
 function setExpanded(v) {
   expanded = v;
@@ -100,5 +151,9 @@ window.renderCard = function (newState) {
 
 render();
 
-// Demo self-test (remove once the real feed is wired): toggle a "thinking" blip.
-// setInterval(() => { state.thinking = !state.thinking; render(); }, 2000);
+// Live feed: the Rust backend polls KAWA and emits `card` events with a CardState.
+if (window.__TAURI__?.event?.listen) {
+  window.__TAURI__.event.listen("card", (e) => {
+    if (e && e.payload) window.renderCard(e.payload);
+  });
+}

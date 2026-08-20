@@ -2,15 +2,17 @@
   "name": "companion-connector",
   "version": "0.1.0",
   "type": "module",
-  "description": "Bridges KAWA Live (HTTP + WebSocket) to a normalized CardState stream for the overlay.",
+  "description": "Bridges KAWA Live to a normalized CardState stream. Zero-dependency (Node 18+ built-in fetch).",
   "bin": {
     "companion-connector": "connector.js"
   },
   "scripts": {
     "start": "node connector.js",
-    "fake": "node connector.js --fake ../fixtures/fake-card.json"
-  },
-  "dependencies": {
-    "ws": "^8.18.0"
+    "start-shoji": "node connector.js --shoji",
+    "start-full": "node connector.js --shoji --speak",
+    "speak": "node connector.js --speak",
+    "fake": "node connector.js --fake ../fixtures/fake-card.json",
+    "fake-shoji": "node connector.js --fake ../fixtures/fake-card.json --shoji",
+    "fake-full": "node connector.js --fake ../fixtures/fake-card.json --shoji --speak"
   }
 }

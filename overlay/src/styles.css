@@ -94,8 +94,40 @@ html, body {
 .tier.covered  .tier-label { color: #a1a1aa; }
 .tier.covered  .tier-item  { opacity: 0.6; text-decoration: line-through; }
 
-/* "Thinking" dot — amber pulse when an agent is processing */
-.dot {
+/* Ask/tell input */
+.card-input {
+  margin-top: 10px;
+}
+.card-input input {
+  width: 100%;
+  box-sizing: border-box;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  padding: 8px 10px;
+  color: #f2f2f7;
+  font-size: 13px;
+  outline: none;
+}
+.card-input input::placeholder { color: rgba(242, 242, 247, 0.5); }
+.card-input input:focus { border-color: rgba(99, 102, 241, 0.9); }
+
+/* Answer response area */
+.answer {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(99, 102, 241, 0.12);
+  border: 1px solid rgba(99, 102, 241, 0.25);
+  font-size: 12.5px;
+  line-height: 1.4;
+  color: #eef;
+  max-height: 160px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+}
+
+/* "Thinking" dot — amber pulse when an agent is processing */.dot {
   width: 8px; height: 8px; border-radius: 50%;
   background: #4ade80; flex-shrink: 0;
 }

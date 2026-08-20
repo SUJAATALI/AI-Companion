@@ -1,129 +1,165 @@
 #!/usr/bin/env node
 /**
- * Companion Connector (Dev A)
- * ---------------------------
- * Bridges KAWA Live to a normalized CardState stream the overlay consumes.
+ * Companion Connector (Dev A) — zero-dependency.
+ * ----------------------------------------------
+ * Bridges KAWA Live to a normalized CardState and renders it as a floating
+ * overlay via **shoji** (Ally's agent overlay system). Uses Node's built-in
+ * fetch (Node 18+) — NO npm packages required.
  *
  * Modes:
- *   node connector.js                 # live: start a KAWA session + subscribe to /ws
+ *   node connector.js                 # live: start a KAWA session, poll display-state
  *   node connector.js --attach <id>   # live: attach to an existing running session
- *   node connector.js --fake <file>   # replay a fixture (no KAWA needed) — unblocks the overlay
+ *   node connector.js --fake <file>   # replay a fixture (no KAWA needed)
  *
- * Output: one JSON object per line (JSONL) on stdout, matching ConnectorEvent
- * in ../shared/card-state.ts:
- *   {"type":"card","state":{...}}
- *   {"type":"status","sessionId":"...","status":"running"}
+ * Flags:
+ *   --shoji            render the card as a shoji `panel` overlay (show/update)
+ *   --speak            speak each new "now" item aloud (macOS `say`)
+ *   --template <id>    KAWA template to start (default: meeting-advisor)
+ *   --interval <ms>    poll interval (default: 800)
  *
- * The overlay can read this stdout stream directly, or we can swap the `emit()`
- * sink for a local WebSocket later. Keep emit() as the single output seam.
+ * Requirements for --shoji:
+ *   - shoji built + on PATH (or set SHOJI_BIN=/path/to/shoji)
+ *   - shoji daemon running:  shoji daemon &
+ *
+ * Output: also emits ConnectorEvent JSONL on stdout (see ../shared/card-state.ts)
+ * so a custom overlay can consume it instead of / in addition to shoji.
  */
 
 import { readFileSync } from "node:fs";
+import { execFile } from "node:child_process";
 
-const KAWA_HTTP = process.env.KAWA_HTTP || "http://localhost:3100/api/live";
-const KAWA_WS = process.env.KAWA_WS || "ws://localhost:3100/ws";
-const TEMPLATE_ID = process.env.KAWA_TEMPLATE || "meeting-advisor";
-
+const HTTP = process.env.KAWA_HTTP || "http://localhost:3100/api/live";
+const SHOJI_BIN = process.env.SHOJI_BIN || "shoji";
+const OVERLAY_ID = "companion";
 const args = process.argv.slice(2);
-const fakeIdx = args.indexOf("--fake");
-const attachIdx = args.indexOf("--attach");
 
-/** Single output seam — swap for a WS server later if needed. */
-function emit(event) {
-  process.stdout.write(JSON.stringify(event) + "\n");
+function flag(name) { return args.includes(name); }
+function opt(name, def) { const i = args.indexOf(name); return i !== -1 ? args[i + 1] : def; }
+
+const USE_SHOJI = flag("--shoji");
+const SPEAK = flag("--speak");
+const TEMPLATE = opt("--template", "meeting-advisor");
+const INTERVAL = parseInt(opt("--interval", "800"), 10);
+
+function emit(event) { process.stdout.write(JSON.stringify(event) + "\n"); }
+
+// ---- voice (macOS `say`) ----
+const spoken = new Set();
+function speakNow(items) {
+  if (!SPEAK) return;
+  for (const it of items) {
+    if (it.tier === "now" && !spoken.has(it.id)) {
+      spoken.add(it.id);
+      execFile("say", [it.text], () => {});
+    }
+  }
 }
 
-// ---------- FAKE MODE (no KAWA) ----------
-if (fakeIdx !== -1) {
-  const file = args[fakeIdx + 1];
-  const evt = JSON.parse(readFileSync(file, "utf8"));
-  emit(evt);
-  // Simulate a "thinking" blip + a follow-up update so the overlay can test transitions.
-  setTimeout(() => emit({ type: "card", state: { ...evt.state, thinking: true, updatedAt: Date.now() } }), 1500);
-  setTimeout(() => emit({ type: "card", state: { ...evt.state, thinking: false, updatedAt: Date.now() } }), 3000);
-  console.error("[connector] fake mode: replayed", file);
-  process.exit(0);
+// ---- shoji overlay ----
+const TIER_META = {
+  now:        { label: "NOW",        color: "green",  pulse: true },
+  transition: { label: "NEXT PAUSE", color: "yellow", pulse: false },
+  later:      { label: "LATER",      color: "blue",   pulse: false },
+  covered:    { label: "COVERED",    color: "gray",   pulse: false },
+};
+const TIER_ORDER = ["now", "transition", "later", "covered"];
+
+function toShojiPanel(state) {
+  const items = [];
+  for (const tier of TIER_ORDER) {
+    for (const it of state.items.filter((i) => i.tier === tier)) {
+      const m = TIER_META[tier];
+      items.push({ label: m.label, color: m.color, value: it.text, pulse: m.pulse });
+    }
+  }
+  return {
+    title: "Companion",
+    icon: "🐾",
+    badge: state.thinking ? "thinking…" : undefined,
+    items,
+  };
 }
 
-// ---------- LIVE MODE ----------
-// Card state we maintain and re-emit on every relevant WS event.
-const state = { sessionId: "", items: [], thinking: false, updatedAt: Date.now() };
-
-function idFor(item, i) {
-  return item.id || `${item.tier}-${i}-${(item.text || "").slice(0, 12)}`;
+let shojiShown = false;
+function pushShoji(state) {
+  if (!USE_SHOJI) return;
+  const data = JSON.stringify(toShojiPanel(state));
+  if (!shojiShown) {
+    shojiShown = true;
+    execFile(SHOJI_BIN, ["show", "panel", "--id", OVERLAY_ID, "--position", "top-right", "--draggable", "--data", data],
+      (err) => { if (err) console.error("[connector] shoji show error:", err.message); });
+  } else {
+    execFile(SHOJI_BIN, ["update", OVERLAY_ID, "--data", data],
+      (err) => { if (err) console.error("[connector] shoji update error:", err.message); });
+  }
 }
 
-function pushCard() {
-  state.updatedAt = Date.now();
-  emit({ type: "card", state: { ...state, items: [...state.items] } });
+// KAWA's /display-state: find the items array wherever it lives.
+function extractItems(displayState) {
+  if (!displayState || typeof displayState !== "object") return [];
+  for (const v of Object.values(displayState)) {
+    if (v && Array.isArray(v.items)) {
+      return v.items
+        .filter((it) => it && it.tier && it.text)
+        .map((it, i) => ({ id: it.id || `${it.tier}-${i}-${String(it.text).slice(0, 16)}`, tier: it.tier, text: it.text }));
+    }
+  }
+  return [];
 }
 
+function render(state) {
+  emit({ type: "card", state });
+  pushShoji(state);
+  speakNow(state.items);
+}
+
+// ---------- FAKE MODE ----------
+if (flag("--fake")) {
+  const evt = JSON.parse(readFileSync(opt("--fake"), "utf8"));
+  render(evt.state);
+  console.error("[connector] fake mode: replayed", opt("--fake"));
+  // keep process alive briefly so async shoji/say calls fire
+  setTimeout(() => process.exit(0), 500);
+}
+
+// ---------- LIVE MODE (HTTP polling) ----------
 async function startSession() {
-  const res = await fetch(`${KAWA_HTTP}/sessions`, {
+  const res = await fetch(`${HTTP}/sessions`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      templateId: TEMPLATE_ID,
-      backend: "browser-speech", // avoid the Intel ORT crash; change if you prefer AWS Transcribe
-      title: "Companion session",
-    }),
+    body: JSON.stringify({ templateId: TEMPLATE, backend: "browser-speech", title: "Companion session" }),
   });
   if (!res.ok) throw new Error(`start session failed: ${res.status} ${await res.text()}`);
-  const json = await res.json();
-  return json.id;
+  return (await res.json()).id;
 }
 
-function handleWsMessage(raw) {
-  let msg;
-  try { msg = JSON.parse(raw); } catch { return; }
-  if (msg.sessionId && state.sessionId && msg.sessionId !== state.sessionId) return; // filter other sessions
+async function fetchDisplayState(id) {
+  const res = await fetch(`${HTTP}/sessions/${id}/display-state`);
+  if (!res.ok) throw new Error(`display-state ${res.status}`);
+  return res.json();
+}
 
-  switch (msg.type) {
-    case "live:display-tool": {
-      // Coaching card update: args.items = [{tier,text}, ...]
-      const items = msg.args?.items;
-      if (Array.isArray(items)) {
-        state.items = items.map((it, i) => ({ id: idFor(it, i), tier: it.tier, text: it.text }));
-        pushCard();
+async function mainLive() {
+  const attach = opt("--attach");
+  const sessionId = attach || (await startSession());
+  console.error(`[connector] ${attach ? "attached to" : "started"} ${sessionId} (poll ${INTERVAL}ms${USE_SHOJI ? ", shoji" : ""}${SPEAK ? ", speak" : ""})`);
+  emit({ type: "status", sessionId, status: "running" });
+
+  let last = "";
+  setInterval(async () => {
+    try {
+      const items = extractItems(await fetchDisplayState(sessionId));
+      const sig = JSON.stringify(items);
+      if (sig !== last) {
+        last = sig;
+        render({ sessionId, items, thinking: false, updatedAt: Date.now() });
       }
-      break;
+    } catch (e) {
+      console.error("[connector] poll error:", e.message);
     }
-    case "live:node-busy":
-      state.thinking = true;
-      pushCard();
-      break;
-    case "live:node-idle":
-      state.thinking = false;
-      pushCard();
-      break;
-    case "live:status":
-      emit({ type: "status", sessionId: msg.sessionId, status: msg.status });
-      break;
-    default:
-      break; // ignore transcript/audio-level/etc for now
-  }
+  }, INTERVAL);
 }
 
-async function main() {
-  const { WebSocket } = await import("ws");
-
-  if (attachIdx !== -1) {
-    state.sessionId = args[attachIdx + 1];
-    console.error("[connector] attaching to session", state.sessionId);
-  } else {
-    state.sessionId = await startSession();
-    console.error("[connector] started session", state.sessionId);
-  }
-  emit({ type: "status", sessionId: state.sessionId, status: "running" });
-
-  const ws = new WebSocket(KAWA_WS);
-  ws.on("open", () => console.error("[connector] ws connected", KAWA_WS));
-  ws.on("message", (data) => handleWsMessage(data.toString()));
-  ws.on("close", () => console.error("[connector] ws closed"));
-  ws.on("error", (e) => console.error("[connector] ws error:", e.message));
+if (!flag("--fake")) {
+  mainLive().catch((e) => { console.error("[connector] fatal:", e.message); process.exit(1); });
 }
-
-main().catch((e) => {
-  console.error("[connector] fatal:", e.message);
-  process.exit(1);
-});

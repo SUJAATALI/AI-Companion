@@ -1,23 +1,31 @@
 #!/usr/bin/env bash
-# P0 — KAWA Live watchdog.
-# Keeps the KAWA daemon alive during the demo. KAWA crashes silently on
-# session-end/summary and during local Parakeet/ORT init on Intel macOS, so:
-#   - always start with --no-tunnel (tunnel retry loop adds instability)
-#   - the app/session must use Browser Speech or AWS Transcribe backend
-#     (set in the KAWA UI: Settings -> Transcription) to avoid the ORT crash
-#   - Post-Session Summary must be OFF (Settings -> Summary) to avoid the end crash
-# This script only guarantees the daemon is up; the backend/summary toggles
-# are one-time settings in the KAWA UI.
+# KAWA Live watchdog — keeps the daemon alive and pinned to a safe backend.
+# The x86_64/Rosetta daemon on Apple Silicon can crash under session load;
+# this restarts it and re-applies Browser Speech (so it never reverts to the
+# crash-prone Parakeet backend on restart).
 
 set -u
-INTERVAL="${1:-5}"   # seconds between health checks
+INTERVAL="${1:-4}"
+KAWA_HTTP="http://localhost:3100"
 
-echo "[watchdog] starting KAWA Live watchdog (check every ${INTERVAL}s). Ctrl+C to stop."
+echo "[watchdog] running (check every ${INTERVAL}s). Ctrl+C to stop."
+
+set_browser_speech() {
+  # wait briefly for health, then pin browser-speech
+  for i in $(seq 1 10); do
+    curl -s "${KAWA_HTTP}/api/live/status" >/dev/null 2>&1 && break
+    sleep 0.5
+  done
+  curl -s -X PATCH "${KAWA_HTTP}/api/live/settings/user" \
+    -H 'content-type: application/json' \
+    -d '{"backend":"browser-speech"}' >/dev/null 2>&1
+}
 
 while true; do
   if ! kawa-live status >/dev/null 2>&1; then
-    echo "[watchdog] $(date '+%H:%M:%S') daemon down -> starting (--no-tunnel)"
+    echo "[watchdog] $(date '+%H:%M:%S') daemon down -> restarting (--no-tunnel, browser-speech)"
     kawa-live --no-tunnel start >/dev/null 2>&1 || echo "[watchdog] start failed, will retry"
+    set_browser_speech
   fi
   sleep "$INTERVAL"
 done
