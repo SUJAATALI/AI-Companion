@@ -27,9 +27,6 @@ struct CardState {
     thinking: bool,
 }
 
-#[cfg(target_os = "macos")]
-use tauri_nspanel::{cocoa::appkit::NSWindowCollectionBehavior, WebviewWindowExt};
-
 fn main() {
     let builder = tauri::Builder::default();
 
