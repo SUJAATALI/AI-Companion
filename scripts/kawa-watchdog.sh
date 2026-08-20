@@ -22,8 +22,11 @@ set_browser_speech() {
 }
 
 while true; do
-  if ! kawa-live status >/dev/null 2>&1; then
-    echo "[watchdog] $(date '+%H:%M:%S') daemon down -> restarting (--no-tunnel, browser-speech)"
+  # Real HTTP health check — `kawa-live status` can report a stale pid as
+  # "running" after a silent crash, so curl the actual endpoint instead.
+  if ! curl -s -m 3 "${KAWA_HTTP}/api/live/status" >/dev/null 2>&1; then
+    echo "[watchdog] $(date '+%H:%M:%S') daemon unhealthy -> restarting (--no-tunnel, browser-speech)"
+    kawa-live start >/dev/null 2>&1 || true          # clears any stale pid file
     kawa-live --no-tunnel start >/dev/null 2>&1 || echo "[watchdog] start failed, will retry"
     set_browser_speech
   fi
